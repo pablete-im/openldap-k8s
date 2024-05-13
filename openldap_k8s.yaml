@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  creationTimestamp: null
+  name: openldap
+  labels: 
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+data:
+  adminpassword: <BASE64 ENCODED ldapadmin USER PASSWORD>
+  passwords: YWRtaW4sdXNlcjEsdXNlcjI=
+  users: YWRtaW4sdXNlcjEsdXNlcjI=
+kind: Secret
+metadata:
+  name: openldap-creds
+  namespace: openldap
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: certs-secret
+  namespace: openldap
+data:
+  ca.crt: <BASE64 ENCODED CA CERTIFICATE>
+  cert.crt: <BASE64 ENCODED OPENLDAP CERTIFICATE>
+  cert.key: <BASE64 ENCODED OPENLDAP PRIVATE KEY>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openldap
+  namespace: openldap
+  labels:
+    app.kubernetes.io/name: openldap
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openldap
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openldap
+    spec:
+      containers:
+        - name: openldap
+          image: bitnami/openldap:latest
+          imagePullPolicy: "IfNotPresent"
+          env:
+            - name: LDAP_ENABLE_TLS
+              value: "yes"
+            - name: LDAP_REQUIRE_TLS
+              value: "yes"
+            - name: LDAP_LDAPS_PORT_NUMBER
+              value: "1636"
+            - name: LDAP_TLS_CA_FILE
+              value: "/tmp/certs/ca.crt"
+            - name: LDAP_TLS_KEY_FILE
+              value: "/tmp/certs/cert.key"
+            - name: LDAP_TLS_CERT_FILE
+              value: "/tmp/certs/cert.crt"
+            - name: LDAP_GROUP
+              value: "tmc-admin"
+            - name: LDAP_ADMIN_USERNAME
+              value: "ldapadmin"
+            - name: LDAP_ROOT
+              value: "dc=tanzu,dc=lab"
+            - name: LDAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: adminpassword
+                  name: openldap-creds
+            - name: LDAP_USERS
+              valueFrom:
+                secretKeyRef:
+                  key: users
+                  name: openldap-creds
+            - name: LDAP_PASSWORDS
+              valueFrom:
+                secretKeyRef:
+                  key: passwords
+                  name: openldap-creds
+          ports:
+            - name: tcp-ldap
+              containerPort: 1636
+          volumeMounts:
+            - name: certs-volume
+              readOnly: true
+              mountPath: "/tmp/certs"
+      volumes:
+        - name: certs-volume
+          secret:
+            secretName: certs-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openldap
+  namespace: openldap
+  labels:
+    app.kubernetes.io/name: openldap
+spec:
+  type: ClusterIP
+  ports:
+    - name: tcp-ldap
+      port: 1636
+      targetPort: tcp-ldap
+  selector:
+    app.kubernetes.io/name: openldap
